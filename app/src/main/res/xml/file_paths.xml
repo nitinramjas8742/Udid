@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    FileProvider paths for sharing generated report images.
+
+    Only the app's private cache sub-directory "reports" is exposed. Report PNGs
+    are temporary exports written there (see ReportImageExporter), so this is
+    the only location the share intent may read from. Nothing in permanent
+    storage is ever shared.
+-->
+<paths>
+    <cache-path
+        name="reports"
+        path="reports/" />
+</paths>

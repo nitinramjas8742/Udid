@@ -1,14 +1,19 @@
 package com.example.udid
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Tab
@@ -33,27 +39,145 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import com.example.udid.notification.DailyDataRefreshWorker
+import com.example.udid.notification.DailyReportNotificationWorker
+import com.example.udid.ui.AboutScreen
 import com.example.udid.ui.ActivityLogTab
+import com.example.udid.ui.MpiSetupScreen
+import com.example.udid.ui.ReportViewModel
+import com.example.udid.ui.ReportsView
 import com.example.udid.ui.UsageSessionList
 import com.example.udid.ui.theme.UdidTheme
 import com.example.udid.usage.AppSession
 import com.example.udid.usage.UsageEventReader
 import com.example.udid.util.UsageAccessHelper
 import kotlinx.coroutines.launch
+import java.util.Calendar
+import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
 
+    private val requestNotificationPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* no-op: notification will silently fail if denied */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        scheduleDailyDataRefresh()
+        scheduleDailyReportNotification()
+        requestPostNotificationPermissionIfNeeded()
         showScreen()
     }
 
     override fun onResume() {
         super.onResume()
         showScreen()
+    }
+
+    /**
+     * Schedule a periodic WorkManager job that fires daily at ~9 PM.
+     *
+     * # How exact-time scheduling works with WorkManager
+     *
+     * WorkManager's PeriodicWorkRequest has a minimum repeat interval of
+     * 15 minutes and does NOT guarantee exact clock times — Android may
+     * shift the trigger by ~15 min for battery optimization. The standard
+     * approach is:
+     *
+     *  1. Calculate the delay from now to the next 9 PM.
+     *  2. Create a PeriodicWorkRequest with a 24-hour repeat interval.
+     *  3. Set the initial delay so the FIRST run lands at ~9 PM.
+     *  4. After that, WorkManager repeats every 24h automatically.
+     *
+     * This gives you "approximately 9 PM daily" without needing the
+     * deprecated setExact/setExactAndAllowWhileIdle AlarmManager APIs.
+     */
+    private fun scheduleDailyReportNotification() {
+        val workRequest = PeriodicWorkRequestBuilder<DailyReportNotificationWorker>(
+            24, TimeUnit.HOURS
+        )
+            .setInitialDelay(calculateDelayToNext9Pm(), TimeUnit.MILLISECONDS)
+            .build()
+
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            DailyReportNotificationWorker.WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            workRequest
+        )
+    }
+
+    /** Milliseconds from now until the next 9:00 PM local time. */
+    private fun calculateDelayToNext9Pm(): Long {
+        val now = Calendar.getInstance()
+        val target = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 21)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        // If 9 PM today has already passed, schedule for tomorrow.
+        if (target.before(now)) {
+            target.add(Calendar.DAY_OF_MONTH, 1)
+        }
+        return target.timeInMillis - now.timeInMillis
+    }
+
+    /**
+     * Schedule a periodic WorkManager job that loads today's usage data at ~8:30 PM,
+     * 30 minutes before the daily notification fires at ~9 PM.
+     */
+    private fun scheduleDailyDataRefresh() {
+        val workRequest = PeriodicWorkRequestBuilder<DailyDataRefreshWorker>(
+            24, TimeUnit.HOURS
+        )
+            .setInitialDelay(calculateDelayToNext830Pm(), TimeUnit.MILLISECONDS)
+            .build()
+
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            DailyDataRefreshWorker.WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            workRequest
+        )
+    }
+
+    /** Milliseconds from now until the next 8:30 PM local time. */
+    private fun calculateDelayToNext830Pm(): Long {
+        val now = Calendar.getInstance()
+        val target = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 20)
+            set(Calendar.MINUTE, 30)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        if (target.before(now)) {
+            target.add(Calendar.DAY_OF_MONTH, 1)
+        }
+        return target.timeInMillis - now.timeInMillis
+    }
+
+    /**
+     * Request POST_NOTIFICATIONS permission on Android 13+ (API 33).
+     * On older devices this is a no-op — the permission doesn't exist and
+     * notifications work automatically.
+     */
+    private fun requestPostNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
     }
 
     private fun showScreen() {
@@ -86,8 +210,22 @@ fun UsageDashboard(context: android.content.Context) {
     var isLoading by remember { mutableStateOf(false) }
     var hasLoaded by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableIntStateOf(0) }
+    var showMpiSetup by remember { mutableStateOf(false) }
+    var showAbout by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val tabs = listOf("Activity", "Summary")
+    val tabs = listOf("Activity", "Summary", "Reports")
+
+    val reportViewModel: ReportViewModel = viewModel(
+        key = "report",
+        factory = ReportViewModel.factory(
+            com.example.udid.data.ReportRepository(
+                com.example.udid.data.AppDatabase
+                    .getInstance(context).sessionDao(),
+                com.example.udid.data.AppDatabase
+                    .getInstance(context).dailySummaryDao()
+            )
+        )
+    )
 
     fun loadSessions() {
         isLoading = true
@@ -95,39 +233,96 @@ fun UsageDashboard(context: android.content.Context) {
             val reader = UsageEventReader(context)
             val endTime = System.currentTimeMillis()
             val startTime = endTime - (24 * 60 * 60 * 1000)
-            sessions = reader.readSessions(startTime, endTime)
+
+            val newSessions = reader.readSessions(startTime, endTime)
+            sessions = newSessions
+
+            // Persist today's sessions so monthly reports have history.
+            val db = com.example.udid.data.AppDatabase.getInstance(context)
+            val sessionRepository = com.example.udid.data.SessionRepository(
+                db.sessionDao(),
+                db.dailySummaryDao()
+            )
+            sessionRepository.storeSessions(newSessions)
+
+            // Retention: keep only the last 30 days of raw session rows.
+            // Daily summaries survive this purge (long-term history).
+            val retentionCutoff = endTime -
+                (com.example.udid.data.ReportRepository.RETENTION_DAYS.toLong() * 24 * 60 * 60 * 1000)
+            sessionRepository.deleteSessionsOlderThan(retentionCutoff)
+
+            // Calculate today's MPI score from the just-persisted sessions.
+            val mpiCalculator = com.example.udid.mpi.MpiScoreCalculator(
+                db.sessionDao(),
+                db.dailySummaryDao(),
+                db.distractingAppConfigDao()
+            )
+            mpiCalculator.calculateAndStoreToday()
+
+            // Verify reports against the persisted data (logcat: UdidReports).
+            verifyReportsOnDevice(db)
+
+            // Freshly persisted data changed; refresh the reports view.
+            reportViewModel.refresh()
+
             isLoading = false
             hasLoaded = true
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(top = 48.dp)
-    ) {
-
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
+                .fillMaxSize()
+                .padding(top = 48.dp)
         ) {
-            Text(
-                text = "Udid",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 4.dp)
-            )
-            Text(
-                text = "Your screen time at a glance",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+
+            // Header: title + settings icon
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Udid",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    Text(
+                        text = "Your screen time at a glance",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                IconButton(onClick = { showAbout = true }) {
+                    Text(
+                        text = "\u2139\uFE0F",
+                        style = MaterialTheme.typography.headlineSmall
+                    )
+                }
+
+                IconButton(onClick = { showMpiSetup = true }) {
+                    Text(
+                        text = "\u2699\uFE0F",
+                        style = MaterialTheme.typography.headlineSmall
+                    )
+                }
+            }
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        if (!hasLoaded && !isLoading) {
+        if (showAbout) {
+            AboutScreen(
+                onBack = { showAbout = false }
+            )
+        } else if (showMpiSetup) {
+            MpiSetupScreen(
+                onBack = { showMpiSetup = false }
+            )
+        } else if (!hasLoaded && !isLoading) {
 
             Column(
                 modifier = Modifier
@@ -210,7 +405,10 @@ fun UsageDashboard(context: android.content.Context) {
                 tabs.forEachIndexed { index, title ->
                     Tab(
                         selected = selectedTab == index,
-                        onClick = { selectedTab = index },
+                        onClick = {
+                            selectedTab = index
+                            if (index == 2) reportViewModel.refresh()
+                        },
                         text = {
                             Text(
                                 text = title,
@@ -231,6 +429,10 @@ fun UsageDashboard(context: android.content.Context) {
                     )
                     1 -> UsageSessionList(
                         sessions = sessions,
+                        modifier = Modifier.weight(1f)
+                    )
+                    2 -> ReportsView(
+                        viewModel = reportViewModel,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -257,6 +459,62 @@ fun UsageDashboard(context: android.content.Context) {
             }
         }
     }
+}
+
+
+/**
+ * On-device sanity check for the report layer. Prints the daily, weekly and
+ * monthly reports computed from the persisted sessions table to logcat under
+ * the tag "UdidReports". Cross-check totals against the Summary tab.
+ */
+private suspend fun verifyReportsOnDevice(db: com.example.udid.data.AppDatabase) {
+    val repository = com.example.udid.data.ReportRepository(
+        db.sessionDao(),
+        db.dailySummaryDao()
+    )
+    val now = System.currentTimeMillis()
+
+    val reportTag = "UdidReports"
+
+    val today = repository.getDailyReport(now)
+    android.util.Log.d(reportTag, "=== DAILY ===")
+    android.util.Log.d(reportTag, "Total screen time: ${today.totalScreenTimeMs / 1000}s")
+    android.util.Log.d(reportTag, "Most used: ${today.mostUsedApp?.appName} (${today.mostUsedApp?.totalMs?.div(1000)}s)")
+    today.perAppBreakdown.forEach {
+        android.util.Log.d(reportTag, "  ${it.appName}: ${it.durationMs / 1000}s (${it.openCount} opens)")
+    }
+    logComparison(reportTag, "vs yesterday", today.comparison)
+
+    val weekStart = repository.startOfWeek(now)
+    val week = repository.getWeeklyReport(weekStart)
+    android.util.Log.d(reportTag, "=== WEEKLY (from $weekStart) ===")
+    android.util.Log.d(reportTag, "Total screen time: ${week.totalScreenTimeMs / 1000}s")
+    week.perAppBreakdown.forEach {
+        android.util.Log.d(reportTag, "  ${it.appName}: ${it.durationMs / 1000}s (${it.openCount} opens)")
+    }
+    logComparison(reportTag, "vs last week", week.comparison)
+
+    val monthStart = repository.startOfMonth(now)
+    val month = repository.getMonthlyReport(monthStart)
+    android.util.Log.d(reportTag, "=== MONTHLY (from $monthStart) ===")
+    android.util.Log.d(reportTag, "Total screen time: ${month.totalScreenTimeMs / 1000}s")
+    month.perAppBreakdown.forEach {
+        android.util.Log.d(reportTag, "  ${it.appName}: ${it.durationMs / 1000}s (${it.openCount} opens)")
+    }
+    logComparison(reportTag, "vs last month", month.comparison)
+}
+
+private fun logComparison(tag: String, label: String, comparison: com.example.udid.data.PeriodComparison?) {
+    if (comparison == null) {
+        android.util.Log.d(tag, "Comparison ($label): not enough prior data")
+        return
+    }
+    val pct = comparison.percentChange
+    val pctText = if (pct == null) "n/a" else String.format(java.util.Locale.US, "%.1f%%", pct)
+    android.util.Log.d(
+        tag,
+        "Comparison ($label): prev=${comparison.previousTotalMs / 1000}s change=$pctText"
+    )
 }
 
 

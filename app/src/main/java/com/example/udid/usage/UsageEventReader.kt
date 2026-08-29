@@ -229,7 +229,14 @@ class UsageEventReader(
         return merged
     }
 
-    private fun getFilteredLaunchableApps(): Map<String, String> {
+    /**
+     * Returns all launchable (user-visible) apps on this device as a map of
+     * packageName -> appName, excluding system launcher/UIServer packages.
+     *
+     * Public so the MPI setup screen can enumerate apps without rebuilding
+     * the same PackageManager query.
+     */
+    fun getFilteredLaunchableApps(): Map<String, String> {
 
         val result = mutableMapOf<String, String>()
 
