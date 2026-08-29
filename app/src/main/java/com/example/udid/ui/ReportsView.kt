@@ -1,5 +1,9 @@
 package com.example.udid.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,18 +17,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -69,20 +72,16 @@ fun ReportsView(
     // Fetch MPI data whenever the Reports tab is shown or sessions change.
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
-            // Check if any distracting apps are configured.
             val db = AppDatabase.getInstance(context)
             val configs = db.distractingAppConfigDao().getAll()
             hasDistractingApps = configs.isNotEmpty()
 
-            // Calculate today's MPI (stores in DB) and use the returned result.
             val todayResult = mpiCalculator.calculateAndStoreToday()
             mpiTodayScore = todayResult.score
             mpiDominantReason = todayResult.dominantReason
 
-            // Get yesterday's score for comparison.
             mpiYesterdayScore = mpiCalculator.getYesterdayScore()
 
-            // Get 7-day trend.
             val scores = mpiCalculator.getRecentScores(7)
             mpiTrend = scores.map { entry ->
                 val dayLabel = formatDayShort(entry.dateMillis)
@@ -110,6 +109,7 @@ fun ReportsView(
             onOpenSetup = { /* Handled by the gear icon in the header */ }
         )
 
+        // ── Tabs ──
         TabRow(
             selectedTabIndex = selectedIndex,
             containerColor = MaterialTheme.colorScheme.surface,
@@ -143,15 +143,23 @@ fun ReportsView(
             }
         }
 
+        // ── Period navigator ──
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+                .padding(horizontal = 8.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
-            TextButton(onClick = { viewModel.shiftPeriod(-1) }) {
-                Text(text = "\u25C0", style = MaterialTheme.typography.titleMedium)
+            IconButton(
+                onClick = { viewModel.shiftPeriod(-1) },
+                modifier = Modifier.size(40.dp)
+            ) {
+                Text(
+                    text = "\u2039",   // ‹ single left-pointing angle quotation
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
 
             Text(
@@ -162,14 +170,29 @@ fun ReportsView(
                 textAlign = TextAlign.Center
             )
 
-            TextButton(onClick = { viewModel.shiftPeriod(1) }) {
-                Text(text = "\u25B6", style = MaterialTheme.typography.titleMedium)
+            IconButton(
+                onClick = { viewModel.shiftPeriod(1) },
+                modifier = Modifier.size(40.dp)
+            ) {
+                Text(
+                    text = "\u203A",   // › single right-pointing angle quotation
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
         }
 
-        Column(modifier = Modifier.weight(1f)) {
+        // ── Report body with crossfade ──
+        AnimatedContent(
+            targetState = uiState,
+            modifier = Modifier.weight(1f),
+            transitionSpec = {
+                fadeIn() togetherWith fadeOut()
+            },
+            label = "report_transition"
+        ) { state ->
             when {
-                uiState.isLoading -> {
+                state.isLoading -> {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
@@ -179,7 +202,7 @@ fun ReportsView(
                                 modifier = Modifier.size(40.dp),
                                 strokeWidth = 4.dp
                             )
-                            Spacer(modifier = Modifier.padding(top = 12.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 text = "Loading report...",
                                 style = MaterialTheme.typography.bodyMedium,
@@ -188,10 +211,10 @@ fun ReportsView(
                         }
                     }
                 }
-                uiState.report != null -> {
+                state.report != null -> {
                     ReportScreen(
-                        report = uiState.report!!,
-                        modifier = Modifier.weight(1f)
+                        report = state.report!!,
+                        modifier = Modifier.fillMaxSize()
                     )
                 }
                 else -> {
@@ -199,54 +222,59 @@ fun ReportsView(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "No usage data for this period.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "\uD83D\uDCCA",
+                                style = MaterialTheme.typography.headlineLarge
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "No usage data for this period",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Load usage data to see your report here",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
         }
 
-        Button(
-            onClick = { viewModel.shareCurrentReport(context) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp)
-                .height(48.dp),
-            enabled = uiState.report != null && !uiState.isSharing && !uiState.isLoading,
-            shape = MaterialTheme.shapes.medium
-        ) {
-            if (uiState.isSharing) {
-                CircularProgressIndicator(
-                    modifier = Modifier
-                        .size(20.dp)
-                        .padding(end = 8.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary
+        // ── Share button (only when report exists) ──
+        if (uiState.report != null) {
+            Button(
+                onClick = { viewModel.shareCurrentReport(context) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .height(48.dp),
+                enabled = !uiState.isSharing && !uiState.isLoading,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                if (uiState.isSharing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .size(20.dp)
+                            .padding(end = 8.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+                Text(
+                    text = if (uiState.isSharing) "Generating image..." else "Share Report",
+                    style = MaterialTheme.typography.labelLarge
                 )
             }
-            Text(
-                text = if (uiState.isSharing) "Generating image..." else "Share Report",
-                style = MaterialTheme.typography.labelLarge
-            )
         }
     }
-}
-
-private fun startOfDay(epochMillis: Long): Long {
-    val cal = java.util.Calendar.getInstance().apply { timeInMillis = epochMillis }
-    cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
-    cal.set(java.util.Calendar.MINUTE, 0)
-    cal.set(java.util.Calendar.SECOND, 0)
-    cal.set(java.util.Calendar.MILLISECOND, 0)
-    return cal.timeInMillis
 }
 
 private fun formatDayShort(epochMillis: Long): String {
     val fmt = java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault())
     return fmt.format(java.util.Date(epochMillis))
 }
-
-private const val DAY_MILLIS = 24L * 60 * 60 * 1000

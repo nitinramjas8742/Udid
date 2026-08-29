@@ -11,15 +11,22 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconButton
@@ -31,6 +38,7 @@ import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -206,12 +214,12 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun UsageDashboard(context: android.content.Context) {
 
-    var sessions by remember { mutableStateOf<List<AppSession>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(false) }
-    var hasLoaded by remember { mutableStateOf(false) }
-    var selectedTab by remember { mutableIntStateOf(0) }
-    var showMpiSetup by remember { mutableStateOf(false) }
-    var showAbout by remember { mutableStateOf(false) }
+    var sessions by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<List<AppSession>>(emptyList()) }
+    var isLoading by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var hasLoaded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var selectedTab by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
+    var showMpiSetup by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var showAbout by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val tabs = listOf("Activity", "Summary", "Reports")
 
@@ -226,6 +234,54 @@ fun UsageDashboard(context: android.content.Context) {
             )
         )
     )
+
+    // ── Helpers ──
+    fun startOfDay(epochMillis: Long): Long {
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = epochMillis }
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+        return cal.timeInMillis
+    }
+
+    fun sessionEntityToAppSession(entity: com.example.udid.data.SessionEntity): AppSession {
+        return AppSession(
+            packageName = entity.packageName,
+            appName = entity.appName,
+            startedAt = entity.startedAt,
+            endedAt = entity.endedAt,
+            durationSec = (entity.endedAt - entity.startedAt) / 1000,
+            isActive = false
+        )
+    }
+
+    // ── Auto-load today's data from DB on first composition ──
+    val db = com.example.udid.data.AppDatabase.getInstance(context)
+
+    fun loadTodaysDataFromDb() {
+        isLoading = true
+        scope.launch {
+            val todayStart = startOfDay(System.currentTimeMillis())
+            val todayEnd = todayStart + 24 * 60 * 60 * 1000L
+
+            val entityList = db.sessionDao().sessionsForDay(todayStart, todayEnd)
+            val appSessions = entityList.map { sessionEntityToAppSession(it) }
+            sessions = appSessions
+
+            if (appSessions.isNotEmpty()) {
+                hasLoaded = true
+                reportViewModel.refresh()
+            }
+            isLoading = false
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (!hasLoaded && !isLoading) {
+            loadTodaysDataFromDb()
+        }
+    }
 
     fun loadSessions() {
         isLoading = true
@@ -273,22 +329,21 @@ fun UsageDashboard(context: android.content.Context) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 48.dp)
+                .windowInsetsPadding(WindowInsets.statusBars)
         ) {
 
-            // Header: title + settings icon
+            // ── Header ──
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Udid",
                         style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 4.dp)
+                        fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = "Your screen time at a glance",
@@ -297,147 +352,181 @@ fun UsageDashboard(context: android.content.Context) {
                     )
                 }
 
-                IconButton(onClick = { showAbout = true }) {
+                // Info icon
+                IconButton(
+                    onClick = { showAbout = true },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(
+                            MaterialTheme.colorScheme.surfaceVariant,
+                            CircleShape
+                        )
+                ) {
                     Text(
-                        text = "\u2139\uFE0F",
-                        style = MaterialTheme.typography.headlineSmall
+                        text = "\u2139",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
-                IconButton(onClick = { showMpiSetup = true }) {
+                Spacer(modifier = Modifier.size(8.dp))
+
+                // Settings icon
+                IconButton(
+                    onClick = { showMpiSetup = true },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(
+                            MaterialTheme.colorScheme.surfaceVariant,
+                            CircleShape
+                        )
+                ) {
                     Text(
-                        text = "\u2699\uFE0F",
-                        style = MaterialTheme.typography.headlineSmall
+                        text = "\u2699",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        if (showAbout) {
-            AboutScreen(
-                onBack = { showAbout = false }
-            )
-        } else if (showMpiSetup) {
-            MpiSetupScreen(
-                onBack = { showMpiSetup = false }
-            )
-        } else if (!hasLoaded && !isLoading) {
-
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = "\uD83D\uDD0D",
-                    style = MaterialTheme.typography.displayLarge
-                )
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                Text(
-                    text = "Ready to track your usage",
-                    style = MaterialTheme.typography.titleMedium,
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "Tap below to scan your app activity from the last 24 hours",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                Button(
-                    onClick = { loadSessions() },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    shape = MaterialTheme.shapes.medium
-                ) {
-                    Text(
-                        text = "Load Usage Data",
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                }
-            }
-
-        } else if (isLoading) {
-
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(48.dp),
-                    strokeWidth = 4.dp
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Scanning app usage...",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-        } else {
-
-            TabRow(
-                selectedTabIndex = selectedTab,
-                containerColor = MaterialTheme.colorScheme.surface,
-                contentColor = MaterialTheme.colorScheme.primary,
-                indicator = { tabPositions ->
-                    TabRowDefaults.SecondaryIndicator(
-                        modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                },
-                modifier = Modifier.padding(horizontal = 16.dp)
-            ) {
-                tabs.forEachIndexed { index, title ->
-                    Tab(
-                        selected = selectedTab == index,
-                        onClick = {
-                            selectedTab = index
-                            if (index == 2) reportViewModel.refresh()
-                        },
-                        text = {
+        // ── Main content + overlays as proper layers ──
+        Box(modifier = Modifier.weight(1f)) {
+            // Main content
+            Column(modifier = Modifier.fillMaxSize()) {
+                when {
+                    !hasLoaded && !isLoading -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
                             Text(
-                                text = title,
-                                fontWeight = if (selectedTab == index) FontWeight.SemiBold else FontWeight.Normal
+                                text = "\uD83D\uDD0D",
+                                style = MaterialTheme.typography.displayLarge
                             )
-                        },
-                        selectedContentColor = MaterialTheme.colorScheme.primary,
-                        unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                            Spacer(modifier = Modifier.height(20.dp))
+                            Text(
+                                text = "Ready to track your usage",
+                                style = MaterialTheme.typography.titleMedium,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Tap below to scan your app activity from the last 24 hours",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(32.dp))
+                            Button(
+                                onClick = { loadSessions() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(52.dp),
+                                shape = MaterialTheme.shapes.medium
+                            ) {
+                                Text(
+                                    text = "Load Usage Data",
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
+                        }
+                    }
+                    isLoading -> {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(48.dp),
+                                strokeWidth = 4.dp
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Scanning app usage...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    else -> {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            TabRow(
+                                selectedTabIndex = selectedTab,
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                contentColor = MaterialTheme.colorScheme.primary,
+                                indicator = { tabPositions ->
+                                    TabRowDefaults.SecondaryIndicator(
+                                        modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                },
+                                modifier = Modifier.padding(horizontal = 16.dp)
+                            ) {
+                                tabs.forEachIndexed { index, title ->
+                                    Tab(
+                                        selected = selectedTab == index,
+                                        onClick = {
+                                            selectedTab = index
+                                            if (index == 2) reportViewModel.refresh()
+                                        },
+                                        text = {
+                                            Text(
+                                                text = title,
+                                                fontWeight = if (selectedTab == index) FontWeight.SemiBold else FontWeight.Normal
+                                            )
+                                        },
+                                        selectedContentColor = MaterialTheme.colorScheme.primary,
+                                        unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            AnimatedVisibility(visible = true, enter = fadeIn()) {
+                                when (selectedTab) {
+                                    0 -> ActivityLogTab(
+                                        sessions = sessions,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    1 -> UsageSessionList(
+                                        sessions = sessions,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    2 -> ReportsView(
+                                        viewModel = reportViewModel,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
-            AnimatedVisibility(visible = true, enter = fadeIn()) {
-                when (selectedTab) {
-                    0 -> ActivityLogTab(
-                        sessions = sessions,
-                        modifier = Modifier.weight(1f)
-                    )
-                    1 -> UsageSessionList(
-                        sessions = sessions,
-                        modifier = Modifier.weight(1f)
-                    )
-                    2 -> ReportsView(
-                        viewModel = reportViewModel,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+            // Overlay: About screen
+            if (showAbout) {
+                AboutScreen(
+                    onBack = { showAbout = false },
+                    modifier = Modifier.fillMaxSize()
+                )
             }
 
+            // Overlay: MPI Setup screen
+            if (showMpiSetup) {
+                MpiSetupScreen(
+                    onBack = { showMpiSetup = false },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+
+        // ── Refresh button (only on main content, not overlays) ──
+        if (!showAbout && !showMpiSetup) {
             OutlinedButton(
                 onClick = { loadSessions() },
                 modifier = Modifier
