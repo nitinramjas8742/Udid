@@ -47,6 +47,14 @@ interface DailySummaryDao {
     @Query("SELECT * FROM daily_summary WHERE dateMillis = :dateMillis LIMIT 1")
     suspend fun getByDateMillis(dateMillis: Long): DailySummaryEntity?
 
+    /** All daily summaries within [startTime, endTime), ordered by date ascending. */
+    @Query(
+        "SELECT * FROM daily_summary " +
+            "WHERE dateMillis >= :startTime AND dateMillis < :endTime " +
+            "ORDER BY dateMillis ASC"
+    )
+    suspend fun summariesInRange(startTime: Long, endTime: Long): List<DailySummaryEntity>
+
     /** Update only the MPI score column for a specific day. */
     @Query("UPDATE daily_summary SET mpiScore = :mpiScore WHERE dateMillis = :dateMillis")
     suspend fun updateMpiScore(dateMillis: Long, mpiScore: Int)

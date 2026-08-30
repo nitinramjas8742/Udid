@@ -3,14 +3,13 @@ package com.example.udid
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,24 +26,27 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -74,9 +76,16 @@ import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
 
+    /** Shared state: true when notification permission was denied and the rationale dialog should show. */
+    val showPermissionRationale = mutableStateOf(false)
+
     private val requestNotificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { /* no-op: notification will silently fail if denied */ }
+    ) { granted ->
+        if (!granted) {
+            showPermissionRationale.value = true
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -118,7 +127,7 @@ class MainActivity : ComponentActivity() {
 
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             DailyReportNotificationWorker.WORK_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             workRequest
         )
     }
@@ -152,7 +161,7 @@ class MainActivity : ComponentActivity() {
 
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             DailyDataRefreshWorker.WORK_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             workRequest
         )
     }
@@ -214,14 +223,47 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun UsageDashboard(context: android.content.Context) {
 
+    val activity = context as? MainActivity
     var sessions by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<List<AppSession>>(emptyList()) }
     var isLoading by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var hasLoaded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var selectedTab by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     var showMpiSetup by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var showAbout by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var isRefreshing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val tabs = listOf("Activity", "Summary", "Reports")
+
+    // ── Permission rationale dialog ──
+    val showPermissionRationale = activity?.showPermissionRationale?.value ?: false
+    if (showPermissionRationale) {
+        AlertDialog(
+            onDismissRequest = { activity?.showPermissionRationale?.value = false },
+            title = { Text("Notification permission needed") },
+            text = {
+                Text(
+                    "Udid needs notification permission to send your daily screen-time report at 9 PM. " +
+                    "You can enable it later in Settings > Apps > Udid > Notifications."
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    activity?.showPermissionRationale?.value = false
+                    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    }
+                    context.startActivity(intent)
+                }) {
+                    Text("Open Settings")
+                }
+            },
+            dismissButton = {
+                Button(onClick = { activity?.showPermissionRationale?.value = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     val reportViewModel: ReportViewModel = viewModel(
         key = "report",
@@ -235,56 +277,9 @@ fun UsageDashboard(context: android.content.Context) {
         )
     )
 
-    // ── Helpers ──
-    fun startOfDay(epochMillis: Long): Long {
-        val cal = java.util.Calendar.getInstance().apply { timeInMillis = epochMillis }
-        cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
-        cal.set(java.util.Calendar.MINUTE, 0)
-        cal.set(java.util.Calendar.SECOND, 0)
-        cal.set(java.util.Calendar.MILLISECOND, 0)
-        return cal.timeInMillis
-    }
-
-    fun sessionEntityToAppSession(entity: com.example.udid.data.SessionEntity): AppSession {
-        return AppSession(
-            packageName = entity.packageName,
-            appName = entity.appName,
-            startedAt = entity.startedAt,
-            endedAt = entity.endedAt,
-            durationSec = (entity.endedAt - entity.startedAt) / 1000,
-            isActive = false
-        )
-    }
-
-    // ── Auto-load today's data from DB on first composition ──
-    val db = com.example.udid.data.AppDatabase.getInstance(context)
-
-    fun loadTodaysDataFromDb() {
-        isLoading = true
-        scope.launch {
-            val todayStart = startOfDay(System.currentTimeMillis())
-            val todayEnd = todayStart + 24 * 60 * 60 * 1000L
-
-            val entityList = db.sessionDao().sessionsForDay(todayStart, todayEnd)
-            val appSessions = entityList.map { sessionEntityToAppSession(it) }
-            sessions = appSessions
-
-            if (appSessions.isNotEmpty()) {
-                hasLoaded = true
-                reportViewModel.refresh()
-            }
-            isLoading = false
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        if (!hasLoaded && !isLoading) {
-            loadTodaysDataFromDb()
-        }
-    }
-
-    fun loadSessions() {
-        isLoading = true
+    fun loadSessions(showLoading: Boolean = false, showRefreshIndicator: Boolean = false) {
+        if (showLoading) isLoading = true
+        if (showRefreshIndicator) isRefreshing = true
         scope.launch {
             val reader = UsageEventReader(context)
             val endTime = System.currentTimeMillis()
@@ -322,8 +317,14 @@ fun UsageDashboard(context: android.content.Context) {
             reportViewModel.refresh()
 
             isLoading = false
+            isRefreshing = false
             hasLoaded = true
         }
+    }
+
+    // ── Auto-sync from UsageStatsManager on every app resume ──
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        loadSessions()
     }
 
         Column(
@@ -423,7 +424,7 @@ fun UsageDashboard(context: android.content.Context) {
                             )
                             Spacer(modifier = Modifier.height(32.dp))
                             Button(
-                                onClick = { loadSessions() },
+                                onClick = { loadSessions(showLoading = true) },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(52.dp),
@@ -487,19 +488,24 @@ fun UsageDashboard(context: android.content.Context) {
                                 }
                             }
 
-                            AnimatedVisibility(visible = true, enter = fadeIn()) {
+                            @OptIn(ExperimentalMaterial3Api::class)
+                            PullToRefreshBox(
+                                isRefreshing = isRefreshing,
+                                onRefresh = { loadSessions(showRefreshIndicator = true) },
+                                modifier = Modifier.weight(1f)
+                            ) {
                                 when (selectedTab) {
                                     0 -> ActivityLogTab(
                                         sessions = sessions,
-                                        modifier = Modifier.weight(1f)
+                                        modifier = Modifier.fillMaxSize()
                                     )
                                     1 -> UsageSessionList(
                                         sessions = sessions,
-                                        modifier = Modifier.weight(1f)
+                                        modifier = Modifier.fillMaxSize()
                                     )
                                     2 -> ReportsView(
                                         viewModel = reportViewModel,
-                                        modifier = Modifier.weight(1f)
+                                        modifier = Modifier.fillMaxSize()
                                     )
                                 }
                             }
@@ -522,29 +528,6 @@ fun UsageDashboard(context: android.content.Context) {
                     onBack = { showMpiSetup = false },
                     modifier = Modifier.fillMaxSize()
                 )
-            }
-        }
-
-        // ── Refresh button (only on main content, not overlays) ──
-        if (!showAbout && !showMpiSetup) {
-            OutlinedButton(
-                onClick = { loadSessions() },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 20.dp)
-                    .height(48.dp),
-                enabled = !isLoading,
-                shape = MaterialTheme.shapes.medium
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier
-                            .size(20.dp)
-                            .padding(end = 8.dp),
-                        strokeWidth = 2.dp
-                    )
-                }
-                Text("Refresh")
             }
         }
     }

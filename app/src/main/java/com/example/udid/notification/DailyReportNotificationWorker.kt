@@ -1,12 +1,15 @@
 package com.example.udid.notification
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -46,11 +49,22 @@ class DailyReportNotificationWorker(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
+        // ── Permission check (Android 13+) ──
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                Log.w(TAG, "POST_NOTIFICATIONS permission not granted, skipping notification")
+                return Result.success()
+            }
+        }
+
         // ── Duplicate prevention ──
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val todayDateStr = todayDateString()
 
         if (prefs.getString(KEY_LAST_NOTIFIED_DATE, null) == todayDateStr) {
+            Log.d(TAG, "Already notified today ($todayDateStr), skipping")
             return Result.success()
         }
 
@@ -62,7 +76,6 @@ class DailyReportNotificationWorker(
         )
 
         val todayStart = startOfDay(System.currentTimeMillis())
-        val todayEnd = todayStart + DAY_MILLIS
 
         // Re-calculate MPI to ensure it's fresh (covers the edge case where
         // the user loaded data but MPI wasn't recalculated yet).
@@ -76,8 +89,11 @@ class DailyReportNotificationWorker(
         val dailySummary = db.dailySummaryDao().getByDateMillis(todayStart)
         val mpiScore = dailySummary?.mpiScore?.takeIf { it > 0 }
 
+        Log.d(TAG, "Data check: totalMs=$totalMs, mpiScore=$mpiScore")
+
         // ── Skip if no data at all ──
         if (totalMs <= 0L && mpiScore == null) {
+            Log.w(TAG, "No screen time or MPI data for today, skipping notification")
             return Result.success()
         }
 
@@ -102,6 +118,7 @@ class DailyReportNotificationWorker(
 
         // ── Mark as notified ──
         prefs.edit().putString(KEY_LAST_NOTIFIED_DATE, todayDateStr).apply()
+        Log.d(TAG, "Notification posted: $title")
 
         return Result.success()
     }
@@ -111,7 +128,7 @@ class DailyReportNotificationWorker(
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Daily Reports",
-                NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Daily screen-time summary notifications"
             }
@@ -137,7 +154,7 @@ class DailyReportNotificationWorker(
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .build()
@@ -174,6 +191,7 @@ class DailyReportNotificationWorker(
     }
 
     companion object {
+        private const val TAG = "DailyReportNotif"
         const val WORK_NAME = "daily_report_notification"
         const val CHANNEL_ID = "daily_report"
         const val NOTIFICATION_ID = 1001

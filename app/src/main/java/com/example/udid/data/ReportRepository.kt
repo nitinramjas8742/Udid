@@ -1,5 +1,6 @@
 package com.example.udid.data
 
+import org.json.JSONObject
 import java.util.Calendar
 
 /**
@@ -122,18 +123,67 @@ class ReportRepository(
     }
 
     private suspend fun buildCurrentReport(start: Long, end: Long): UsageReport {
-        val totalRow = sessionDao.totalScreenTime(start, end)
-        val perApp = sessionDao.screenTimeByApp(start, end)
-        val mostUsed = sessionDao.mostUsedApp(start, end)
-        val openCounts = sessionDao.openCountByApp(start, end)
-        return UsageReport(
-            startTime = start,
-            endTime = end,
-            totalScreenTimeMs = totalRow.totalMs,
-            perAppBreakdown = perApp,
-            mostUsedApp = mostUsed,
-            openCountByApp = openCounts
-        )
+        return if (isCoveredByRawSessions(start)) {
+            // Raw sessions are available — use them directly.
+            val totalRow = sessionDao.totalScreenTime(start, end)
+            val perApp = sessionDao.screenTimeByApp(start, end)
+            val mostUsed = sessionDao.mostUsedApp(start, end)
+            val openCounts = sessionDao.openCountByApp(start, end)
+            UsageReport(
+                startTime = start,
+                endTime = end,
+                totalScreenTimeMs = totalRow.totalMs,
+                perAppBreakdown = perApp,
+                mostUsedApp = mostUsed,
+                openCountByApp = openCounts
+            )
+        } else {
+            // Raw sessions purged — fall back to daily_summary for each day in range.
+            val summaries = dailySummaryDao.summariesInRange(start, end)
+            val totalMs = summaries.sumOf { it.totalScreenTimeMs }
+
+            // Merge per-app JSON from each day in the range.
+            val mergedTime = mutableMapOf<String, Long>()
+            val mergedOpen = mutableMapOf<String, Int>()
+            for (summary in summaries) {
+                try {
+                    val timeJson = JSONObject(summary.perAppTimeJson)
+                    for (key in timeJson.keys()) {
+                        mergedTime[key] = (mergedTime[key] ?: 0L) + timeJson.getLong(key)
+                    }
+                } catch (_: Exception) { /* skip malformed JSON */ }
+                try {
+                    val openJson = JSONObject(summary.perAppOpenCountJson)
+                    for (key in openJson.keys()) {
+                        mergedOpen[key] = (mergedOpen[key] ?: 0) + openJson.getInt(key)
+                    }
+                } catch (_: Exception) { /* skip malformed JSON */ }
+            }
+
+            val perApp = mergedTime.entries
+                .sortedByDescending { it.value }
+                .map { (pkg, durationMs) ->
+                    AppUsageRow(
+                        packageName = pkg,
+                        appName = pkg.substringAfterLast('.'),
+                        durationMs = durationMs,
+                        openCount = mergedOpen[pkg] ?: 0
+                    )
+                }
+
+            val mostUsed = perApp.maxByOrNull { it.durationMs }
+
+            UsageReport(
+                startTime = start,
+                endTime = end,
+                totalScreenTimeMs = totalMs,
+                perAppBreakdown = perApp,
+                mostUsedApp = mostUsed?.let {
+                    MostUsedRow(it.packageName, it.appName, it.durationMs)
+                },
+                openCountByApp = perApp.sortedByDescending { it.openCount }
+            )
+        }
     }
 
     private suspend fun buildComparison(
