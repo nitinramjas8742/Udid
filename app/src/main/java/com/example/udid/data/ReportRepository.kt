@@ -41,9 +41,13 @@ class ReportRepository(
         })
     }
 
-    /** Report covering the 7-day period starting at weekStartEpochMillis. */
+    /** Report covering the 7-day period containing weekStartEpochMillis. */
     suspend fun getWeeklyReport(weekStartEpochMillis: Long): UsageReport {
-        val start = startOfDay(weekStartEpochMillis)
+        val cal = Calendar.getInstance().apply {
+            timeInMillis = weekStartEpochMillis
+            set(Calendar.DAY_OF_WEEK, firstDayOfWeek)
+        }
+        val start = startOfDay(cal.timeInMillis)
         val end = start + 7 * DAY_MILLIS
         return buildReport(start, end, previousRange = { previousStart ->
             previousStart - 7 * DAY_MILLIS to previousStart
