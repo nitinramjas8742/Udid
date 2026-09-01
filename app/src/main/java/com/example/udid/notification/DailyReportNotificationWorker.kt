@@ -24,7 +24,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Fires a daily notification at ~9 PM with the user's screen-time summary.
+ * Fires a daily notification at ~11:55 PM with the user's screen-time summary.
  *
  * Runs as a CoroutineWorker so database reads happen off the main thread.
  * Uses SharedPreferences to prevent duplicate notifications on the same day
