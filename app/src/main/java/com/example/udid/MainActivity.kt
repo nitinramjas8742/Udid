@@ -66,7 +66,7 @@ import com.example.udid.ui.MpiSetupScreen
 import com.example.udid.ui.ReportViewModel
 import com.example.udid.ui.ReportsView
 import com.example.udid.ui.UsageSessionList
-import com.example.udid.ui.theme.UdidTheme
+import com.example.udid.ui.theme.TimeSlayerTheme
 import com.example.udid.usage.AppSession
 import com.example.udid.usage.UsageEventReader
 import com.example.udid.util.UsageAccessHelper
@@ -101,7 +101,7 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Schedule a periodic WorkManager job that fires daily at ~9 PM.
+     * Schedule a periodic WorkManager job that fires daily at ~11:55 PM.
      *
      * # How exact-time scheduling works with WorkManager
      *
@@ -110,19 +110,23 @@ class MainActivity : ComponentActivity() {
      * shift the trigger by ~15 min for battery optimization. The standard
      * approach is:
      *
-     *  1. Calculate the delay from now to the next 9 PM.
+     *  1. Calculate the delay from now to the next 11:55 PM.
      *  2. Create a PeriodicWorkRequest with a 24-hour repeat interval.
-     *  3. Set the initial delay so the FIRST run lands at ~9 PM.
+     *  3. Set the initial delay so the FIRST run lands at ~11:55 PM.
      *  4. After that, WorkManager repeats every 24h automatically.
      *
-     * This gives you "approximately 9 PM daily" without needing the
+     * This gives you "approximately 11:55 PM daily" without needing the
      * deprecated setExact/setExactAndAllowWhileIdle AlarmManager APIs.
+     *
+     * 11:55 PM is chosen so that the late-night usage window (11 PM – 5 AM)
+     * is mostly complete before the notification fires, giving the user an
+     * accurate picture of their full day.
      */
     private fun scheduleDailyReportNotification() {
         val workRequest = PeriodicWorkRequestBuilder<DailyReportNotificationWorker>(
             24, TimeUnit.HOURS
         )
-            .setInitialDelay(calculateDelayToNext9Pm(), TimeUnit.MILLISECONDS)
+            .setInitialDelay(calculateDelayToNext1155Pm(), TimeUnit.MILLISECONDS)
             .build()
 
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
@@ -132,16 +136,16 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    /** Milliseconds from now until the next 9:00 PM local time. */
-    private fun calculateDelayToNext9Pm(): Long {
+    /** Milliseconds from now until the next 11:55 PM local time. */
+    private fun calculateDelayToNext1155Pm(): Long {
         val now = Calendar.getInstance()
         val target = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 21)
-            set(Calendar.MINUTE, 0)
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 55)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
         }
-        // If 9 PM today has already passed, schedule for tomorrow.
+        // If 11:55 PM today has already passed, schedule for tomorrow.
         if (target.before(now)) {
             target.add(Calendar.DAY_OF_MONTH, 1)
         }
@@ -149,14 +153,14 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Schedule a periodic WorkManager job that loads today's usage data at ~8:30 PM,
-     * 30 minutes before the daily notification fires at ~9 PM.
+     * Schedule a periodic WorkManager job that loads today's usage data at ~11:30 PM,
+     * 25 minutes before the daily notification fires at ~11:55 PM.
      */
     private fun scheduleDailyDataRefresh() {
         val workRequest = PeriodicWorkRequestBuilder<DailyDataRefreshWorker>(
             24, TimeUnit.HOURS
         )
-            .setInitialDelay(calculateDelayToNext830Pm(), TimeUnit.MILLISECONDS)
+            .setInitialDelay(calculateDelayToNext1130Pm(), TimeUnit.MILLISECONDS)
             .build()
 
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
@@ -166,11 +170,11 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    /** Milliseconds from now until the next 8:30 PM local time. */
-    private fun calculateDelayToNext830Pm(): Long {
+    /** Milliseconds from now until the next 11:30 PM local time. */
+    private fun calculateDelayToNext1130Pm(): Long {
         val now = Calendar.getInstance()
         val target = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 20)
+            set(Calendar.HOUR_OF_DAY, 23)
             set(Calendar.MINUTE, 30)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
@@ -202,7 +206,7 @@ class MainActivity : ComponentActivity() {
             UsageAccessHelper.hasUsageAccess(this)
 
         setContent {
-            UdidTheme {
+            TimeSlayerTheme {
                 if (hasUsageAccess) {
                     UsageDashboard(context = this)
                 } else {
@@ -242,8 +246,8 @@ fun UsageDashboard(context: android.content.Context) {
             title = { Text("Notification permission needed") },
             text = {
                 Text(
-                    "Udid needs notification permission to send your daily screen-time report at 9 PM. " +
-                    "You can enable it later in Settings > Apps > Udid > Notifications."
+                    "TimeSlayer needs notification permission to send your daily screen-time report at 11:55 PM. " +
+                    "You can enable it later in Settings > Apps > TimeSlayer > Notifications."
                 )
             },
             confirmButton = {
@@ -342,7 +346,7 @@ fun UsageDashboard(context: android.content.Context) {
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Udid",
+                        text = "TimeSlayer",
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -537,7 +541,7 @@ fun UsageDashboard(context: android.content.Context) {
 /**
  * On-device sanity check for the report layer. Prints the daily, weekly and
  * monthly reports computed from the persisted sessions table to logcat under
- * the tag "UdidReports". Cross-check totals against the Summary tab.
+ * the tag "TimeSlayerReports". Cross-check totals against the Summary tab.
  */
 private suspend fun verifyReportsOnDevice(db: com.example.udid.data.AppDatabase) {
     val repository = com.example.udid.data.ReportRepository(
@@ -546,7 +550,7 @@ private suspend fun verifyReportsOnDevice(db: com.example.udid.data.AppDatabase)
     )
     val now = System.currentTimeMillis()
 
-    val reportTag = "UdidReports"
+    val reportTag = "TimeSlayerReports"
 
     val today = repository.getDailyReport(now)
     android.util.Log.d(reportTag, "=== DAILY ===")
@@ -617,7 +621,7 @@ fun PermissionScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         Text(
-            text = "Udid needs Usage Access to track which apps you use and for how long. Your data stays on your device.",
+            text = "TimeSlayer needs Usage Access to track which apps you use and for how long. Your data stays on your device.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,

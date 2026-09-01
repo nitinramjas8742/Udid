@@ -76,7 +76,7 @@ fun AboutScreen(
             SectionHeader("About the app")
 
             Text(
-                text = "Udid helps you understand your phone habits — how much time you spend, which apps pull you in, and whether your usage is trending in a healthy direction.",
+                text = "TimeSlayer helps you understand your phone habits — how much time you spend, which apps pull you in, and whether your usage is trending in a healthy direction.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -84,7 +84,7 @@ fun AboutScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Privacy first: Udid tracks WHEN and HOW LONG you use apps, but never WHAT you do inside them. No messages, searches, content, or activity inside apps is ever tracked. Everything stays on your device — fully offline, no accounts, no cloud sync. Your data never leaves your phone.",
+                text = "Privacy first: TimeSlayer tracks WHEN and HOW LONG you use apps, but never WHAT you do inside them. No messages, searches, content, or activity inside apps is ever tracked. Everything stays on your device — fully offline, no accounts, no cloud sync. Your data never leaves your phone.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -95,7 +95,7 @@ fun AboutScreen(
             SectionHeader("What is MPI?")
 
             Text(
-                text = "MPI stands for Mental Peace Index. It is NOT a medical or clinical term — it is Udid's own simple measure of how balanced your phone usage is on any given day.",
+                text = "MPI stands for Mental Peace Index. It is NOT a medical or clinical term — it is TimeSlayer's own simple measure of how balanced your phone usage is on any given day.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -210,7 +210,7 @@ fun AboutScreen(
             SectionHeader("Support the project")
 
             Text(
-                text = "Udid is independently developed with no ads, no trackers, and no subscription fees. If it helps you, consider buying me a coffee — every contribution supports continued development.",
+                text = "TimeSlayer is independently developed with no ads, no trackers, and no subscription fees. If it helps you, consider buying me a coffee — every contribution supports continued development.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

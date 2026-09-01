@@ -82,7 +82,7 @@ object ReportImageExporter {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             clipData = android.content.ClipData.newUri(
                 activity.contentResolver,
-                "udid_report",
+                "timeslayer_report",
                 uri
             )
         }

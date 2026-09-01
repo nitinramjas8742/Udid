@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Udid"
+rootProject.name = "TimeSlayer"
 include(":app")

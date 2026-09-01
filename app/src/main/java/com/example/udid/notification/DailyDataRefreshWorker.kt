@@ -12,11 +12,12 @@ import java.util.Calendar
 
 /**
  * Automatically loads today's usage data and calculates MPI before the
- * daily notification fires (scheduled at ~8:30 PM, 30 min before the
- * 9 PM notification).
+ * daily notification fires (scheduled at ~11:30 PM, 25 min before the
+ * 11:55 PM notification).
  *
  * This ensures the notification always has fresh data to show, even if
- * the user never manually tapped "Load Usage Data" that day.
+ * the user never manually loaded data that day. The late-night window
+ * (11 PM – 5 AM) is mostly complete by this time.
  *
  * Steps:
  *  1. Query UsageStatsManager for today's sessions (midnight → now)
