@@ -229,6 +229,7 @@ fun UsageDashboard(context: android.content.Context) {
 
     val activity = context as? MainActivity
     var sessions by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<List<AppSession>>(emptyList()) }
+    var notes by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<Map<String, String>>(emptyMap()) }
     var isLoading by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var hasLoaded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var selectedTab by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
@@ -296,7 +297,8 @@ fun UsageDashboard(context: android.content.Context) {
             val db = com.example.udid.data.AppDatabase.getInstance(context)
             val sessionRepository = com.example.udid.data.SessionRepository(
                 db.sessionDao(),
-                db.dailySummaryDao()
+                db.dailySummaryDao(),
+                db.sessionNoteDao()
             )
             sessionRepository.storeSessions(newSessions)
 
@@ -305,6 +307,11 @@ fun UsageDashboard(context: android.content.Context) {
             val retentionCutoff = endTime -
                 (com.example.udid.data.ReportRepository.RETENTION_DAYS.toLong() * 24 * 60 * 60 * 1000)
             sessionRepository.deleteSessionsOlderThan(retentionCutoff)
+            sessionRepository.deleteNotesOlderThan(retentionCutoff)
+
+            // Load notes for the past 30 days.
+            val noteEntities = db.sessionNoteDao().getNotesInRange(retentionCutoff, endTime)
+            notes = noteEntities.associate { it.sessionKey to it.noteText }
 
             // Calculate today's MPI score from the just-persisted sessions.
             val mpiCalculator = com.example.udid.mpi.MpiScoreCalculator(
@@ -501,6 +508,39 @@ fun UsageDashboard(context: android.content.Context) {
                                 when (selectedTab) {
                                     0 -> ActivityLogTab(
                                         sessions = sessions,
+                                        notes = notes,
+                                        onSaveNote = { sessionKey, text ->
+                                            scope.launch {
+                                                val db = com.example.udid.data.AppDatabase.getInstance(context)
+                                                val repo = com.example.udid.data.SessionRepository(
+                                                    db.sessionDao(),
+                                                    db.dailySummaryDao(),
+                                                    db.sessionNoteDao()
+                                                )
+                                                repo.saveNote(sessionKey, text)
+                                                // Refresh notes map
+                                                val retentionCutoff = System.currentTimeMillis() -
+                                                    (com.example.udid.data.ReportRepository.RETENTION_DAYS.toLong() * 24 * 60 * 60 * 1000)
+                                                val noteEntities = db.sessionNoteDao().getNotesInRange(retentionCutoff, System.currentTimeMillis())
+                                                notes = noteEntities.associate { it.sessionKey to it.noteText }
+                                            }
+                                        },
+                                        onDeleteNote = { sessionKey ->
+                                            scope.launch {
+                                                val db = com.example.udid.data.AppDatabase.getInstance(context)
+                                                val repo = com.example.udid.data.SessionRepository(
+                                                    db.sessionDao(),
+                                                    db.dailySummaryDao(),
+                                                    db.sessionNoteDao()
+                                                )
+                                                repo.deleteNote(sessionKey)
+                                                // Refresh notes map
+                                                val retentionCutoff = System.currentTimeMillis() -
+                                                    (com.example.udid.data.ReportRepository.RETENTION_DAYS.toLong() * 24 * 60 * 60 * 1000)
+                                                val noteEntities = db.sessionNoteDao().getNotesInRange(retentionCutoff, System.currentTimeMillis())
+                                                notes = noteEntities.associate { it.sessionKey to it.noteText }
+                                            }
+                                        },
                                         modifier = Modifier.fillMaxSize()
                                     )
                                     1 -> UsageSessionList(

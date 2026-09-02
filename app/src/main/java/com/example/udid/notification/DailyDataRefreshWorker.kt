@@ -39,7 +39,8 @@ class DailyDataRefreshWorker(
             val db = AppDatabase.getInstance(context)
             val sessionRepository = com.example.udid.data.SessionRepository(
                 db.sessionDao(),
-                db.dailySummaryDao()
+                db.dailySummaryDao(),
+                db.sessionNoteDao()
             )
 
             // 1. Read today's sessions (midnight → now)
@@ -54,6 +55,7 @@ class DailyDataRefreshWorker(
             val retentionCutoff = now -
                 (ReportRepository.RETENTION_DAYS.toLong() * 24 * 60 * 60 * 1000)
             sessionRepository.deleteSessionsOlderThan(retentionCutoff)
+            sessionRepository.deleteNotesOlderThan(retentionCutoff)
 
             // 4. Calculate and store today's MPI
             val mpiCalculator = MpiScoreCalculator(

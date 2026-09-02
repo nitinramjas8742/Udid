@@ -17,9 +17,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     entities = [
         SessionEntity::class,
         DailySummaryEntity::class,
-        DistractingAppConfig::class
+        DistractingAppConfig::class,
+        SessionNote::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -29,6 +30,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun dailySummaryDao(): DailySummaryDao
 
     abstract fun distractingAppConfigDao(): DistractingAppConfigDao
+
+    abstract fun sessionNoteDao(): SessionNoteDao
 
     companion object {
         private const val DATABASE_NAME = "udid.db"
@@ -133,6 +136,27 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Migration v6 -> v7: adds the `session_notes` table for user-written
+         * notes attached to individual usage sessions.
+         */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS session_notes (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "sessionKey TEXT NOT NULL, " +
+                        "noteText TEXT NOT NULL, " +
+                        "createdAt INTEGER NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_session_notes_sessionKey " +
+                        "ON session_notes (sessionKey)"
+                )
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -147,7 +171,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     DATABASE_NAME
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .build().also { instance = it }
             }
         }

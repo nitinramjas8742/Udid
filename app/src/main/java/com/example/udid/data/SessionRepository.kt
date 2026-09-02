@@ -15,7 +15,8 @@ import java.util.Calendar
  */
 class SessionRepository(
     private val sessionDao: SessionDao,
-    private val dailySummaryDao: DailySummaryDao
+    private val dailySummaryDao: DailySummaryDao,
+    private val sessionNoteDao: SessionNoteDao
 ) {
 
     /**
@@ -62,6 +63,38 @@ class SessionRepository(
      */
     suspend fun deleteSessionsOlderThan(epochMillis: Long) {
         sessionDao.deleteOlderThan(epochMillis)
+    }
+
+    // ── Session notes ──
+
+    /** Get the note text for a session, or null if none exists. */
+    suspend fun getNoteForSession(sessionKey: String): String? {
+        return sessionNoteDao.getNoteForSession(sessionKey)?.noteText
+    }
+
+    /** Save (insert or update) a note for a session. */
+    suspend fun saveNote(sessionKey: String, text: String) {
+        val now = System.currentTimeMillis()
+        val existing = sessionNoteDao.getNoteForSession(sessionKey)
+        sessionNoteDao.insertOrUpdate(
+            SessionNote(
+                id = existing?.id ?: 0,
+                sessionKey = sessionKey,
+                noteText = text,
+                createdAt = existing?.createdAt ?: now,
+                updatedAt = now
+            )
+        )
+    }
+
+    /** Delete a note for a session. */
+    suspend fun deleteNote(sessionKey: String) {
+        sessionNoteDao.deleteNote(sessionKey)
+    }
+
+    /** Delete notes older than [epochMillis] (retention purge, 30 days). */
+    suspend fun deleteNotesOlderThan(epochMillis: Long) {
+        sessionNoteDao.deleteOlderThan(epochMillis)
     }
 
     private suspend fun refreshDailySummary(dayStart: Long) {
