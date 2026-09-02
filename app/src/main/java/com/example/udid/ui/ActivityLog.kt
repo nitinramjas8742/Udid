@@ -51,6 +51,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.udid.ui.theme.ActiveGreen
 import com.example.udid.usage.AppSession
+import com.example.udid.util.NotesPdfExporter
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -155,7 +156,31 @@ fun ActivityLogTab(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.align(Alignment.CenterVertically)
                     )
+                    Text(
+                        text = "Download PDF",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .align(Alignment.CenterVertically)
+                            .clickable {
+                                val activity = context as? android.app.Activity
+                                if (activity != null) {
+                                    NotesPdfExporter.downloadToDownloads(activity, sessions, notes)
+                                }
+                            }
+                            .padding(start = 4.dp)
+                    )
                 }
+            }
+            // Helper text
+            if (!showNotesOnly) {
+                Text(
+                    text = "Tap session to add notes",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
             }
         }
 
