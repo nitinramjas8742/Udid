@@ -11,6 +11,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,10 +25,15 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
@@ -49,6 +55,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -236,6 +245,7 @@ fun UsageDashboard(context: android.content.Context) {
     var showMpiSetup by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var showAbout by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var isRefreshing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var showYouTubePromo by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val tabs = listOf("Activity", "Summary", "Reports")
 
@@ -268,6 +278,124 @@ fun UsageDashboard(context: android.content.Context) {
                 }
             }
         )
+    }
+
+    // ── YouTube channel promo popup ──
+    if (showYouTubePromo) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showYouTubePromo = false }
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Red header with play button
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                brush = Brush.linearGradient(
+                                    colors = listOf(
+                                        Color(0xFFFF0000),
+                                        Color(0xFFFF4444)
+                                    )
+                                )
+                            )
+                            .padding(vertical = 28.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            // Play button circle
+                            Box(
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "\u25B6",
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = Color.White
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "Nitin Growth Lab",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+
+                    // Content
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Level up your life",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Growth tips, productivity hacks, and real talk about building a better life. New videos every week.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        // Subscribe button
+                        Button(
+                            onClick = {
+                                showYouTubePromo = false
+                                val intent = Intent(
+                                    Intent.ACTION_VIEW,
+                                    android.net.Uri.parse("https://www.youtube.com/@NitinGrowthLab")
+                                )
+                                context.startActivity(intent)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFFF0000)
+                            )
+                        ) {
+                            Text(
+                                text = "\u25B6  Subscribe on YouTube",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Dismiss
+                        Text(
+                            text = "Maybe later",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .clickable { showYouTubePromo = false }
+                                .padding(vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+        }
     }
 
     val reportViewModel: ReportViewModel = viewModel(
@@ -336,6 +464,16 @@ fun UsageDashboard(context: android.content.Context) {
     // ── Auto-sync from UsageStatsManager on every app resume ──
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         loadSessions()
+
+        // YouTube promo: 20% chance, min 7-day cooldown
+        val prefs = context.getSharedPreferences("timeslayer_prefs", android.content.Context.MODE_PRIVATE)
+        val lastShown = prefs.getLong("youtube_promo_last_shown", 0)
+        val now = System.currentTimeMillis()
+        val sevenDays = 3L * 24 * 60 * 60 * 1000
+        if (now - lastShown > sevenDays && Math.random() < 0.2) {
+            showYouTubePromo = true
+            prefs.edit().putLong("youtube_promo_last_shown", now).apply()
+        }
     }
 
         Column(
@@ -349,7 +487,7 @@ fun UsageDashboard(context: android.content.Context) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Top
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -364,40 +502,45 @@ fun UsageDashboard(context: android.content.Context) {
                     )
                 }
 
-                // Info icon
-                IconButton(
-                    onClick = { showAbout = true },
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(
-                            MaterialTheme.colorScheme.surfaceVariant,
-                            CircleShape
-                        )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(top = 4.dp)
                 ) {
-                    Text(
-                        text = "\u2139",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                Spacer(modifier = Modifier.size(8.dp))
-
-                // Settings icon
-                IconButton(
-                    onClick = { showMpiSetup = true },
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(
-                            MaterialTheme.colorScheme.surfaceVariant,
-                            CircleShape
+                    // About button
+                    Button(
+                        onClick = { showAbout = true },
+                        modifier = Modifier.height(26.dp),
+                        shape = RoundedCornerShape(6.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
+                    ) {
+                        Text(
+                            text = "About",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                ) {
-                    Text(
-                        text = "\u2699",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    }
+
+                    // Setup MPI button
+                    Button(
+                        onClick = { showMpiSetup = true },
+                        modifier = Modifier.height(26.dp),
+                        shape = RoundedCornerShape(6.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        ),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
+                    ) {
+                        Text(
+                            text = "Setup MPI",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
                 }
             }
 

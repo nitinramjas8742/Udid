@@ -106,7 +106,7 @@ fun ReportsView(
             dominantReason = mpiDominantReason,
             trend = mpiTrend,
             hasDistractingApps = hasDistractingApps,
-            onOpenSetup = { /* Handled by the gear icon in the header */ }
+            onOpenSetup = { /* Handled by the Setup MPI button in the header */ }
         )
 
         // ── Tabs ──

@@ -53,12 +53,7 @@ fun MpiScoreSection(
     ) {
         when {
             !hasDistractingApps -> {
-                Text(
-                    text = "Set up distracting apps for MPI \u2022 Tap \u2699\uFE0F",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
-                    maxLines = 1
-                )
+                // Hint is shown in ReportsView instead
             }
             todayScore == null -> {
                 Text(
