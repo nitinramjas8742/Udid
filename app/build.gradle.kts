@@ -20,11 +20,21 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("../timeslayer-release.jks")
+            storePassword = "timeslayer123"
+            keyAlias = "timeslayer"
+            keyPassword = "timeslayer123"
+        }
+    }
+
     buildTypes {
         release {
             optimization {
                 enable = false
             }
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
