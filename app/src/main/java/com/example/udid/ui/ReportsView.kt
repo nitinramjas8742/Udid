@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -246,11 +247,14 @@ fun ReportsView(
         }
 
         // ── Share button (only when report exists) ──
+        // navigationBarsPadding() keeps it above gesture / 3-button nav even
+        // if the parent forgets safeDrawing insets.
         if (uiState.report != null) {
             Button(
                 onClick = { viewModel.shareCurrentReport(context) },
                 modifier = Modifier
                     .fillMaxWidth()
+                    .navigationBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 10.dp)
                     .height(48.dp),
                 enabled = !uiState.isSharing && !uiState.isLoading,

@@ -17,12 +17,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
@@ -98,6 +100,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         scheduleDailyDataRefresh()
         scheduleDailyReportNotification()
         requestPostNotificationPermissionIfNeeded()
@@ -237,8 +240,12 @@ class MainActivity : ComponentActivity() {
 fun UsageDashboard(context: android.content.Context) {
 
     val activity = context as? MainActivity
-    var sessions by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<List<AppSession>>(emptyList()) }
-    var notes by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<Map<String, String>>(emptyMap()) }
+    // sessions / notes hold custom types (AppSession) that are not Parcelable,
+    // so they must use remember (not rememberSaveable) to avoid a crash on
+    // save/restore. Only primitives stay in rememberSaveable.
+    var sessions by remember { mutableStateOf<List<AppSession>>(emptyList()) }
+    var historySessions by remember { mutableStateOf<List<AppSession>>(emptyList()) }
+    var notes by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var isLoading by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var hasLoaded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var selectedTab by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
@@ -441,6 +448,36 @@ fun UsageDashboard(context: android.content.Context) {
             val noteEntities = db.sessionNoteDao().getNotesInRange(retentionCutoff, endTime)
             notes = noteEntities.associate { it.sessionKey to it.noteText }
 
+            // Load 30-day history sessions from DB so the "Notes only"
+            // filter and PDF export can show a full month. The live
+            // `sessions` list only covers the last 24h from UsageStatsManager,
+            // so old notes would otherwise have no session to attach to and
+            // appear to "disappear" after a day.
+            val historyEntities = db.sessionDao().sessionsForDay(retentionCutoff, endTime)
+            val historyFromDb = historyEntities.map {
+                AppSession(
+                    packageName = it.packageName,
+                    appName = it.appName,
+                    startedAt = it.startedAt,
+                    endedAt = it.endedAt,
+                    durationSec = it.durationSec,
+                    isActive = false
+                )
+            }
+            // Union live + stored, deduped by stable session key.
+            val seenKeys = HashSet<String>(historyFromDb.size + newSessions.size)
+            val merged = ArrayList<AppSession>(historyFromDb.size + newSessions.size)
+            for (s in historyFromDb) {
+                val k = "${s.packageName}_${s.startedAt}_${s.endedAt}"
+                if (seenKeys.add(k)) merged.add(s)
+            }
+            for (s in newSessions) {
+                val k = "${s.packageName}_${s.startedAt}_${s.endedAt}"
+                if (seenKeys.add(k)) merged.add(s)
+            }
+            merged.sortByDescending { it.startedAt }
+            historySessions = merged
+
             // Calculate today's MPI score from the just-persisted sessions.
             val mpiCalculator = com.example.udid.mpi.MpiScoreCalculator(
                 db.sessionDao(),
@@ -479,7 +516,10 @@ fun UsageDashboard(context: android.content.Context) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.statusBars)
+                // statusBars only leaves the bottom (gesture / 3-button nav)
+                // overlapping content — e.g. Share button. safeDrawing covers
+                // status + navigation + cutout on all devices.
+                .windowInsetsPadding(WindowInsets.safeDrawing)
         ) {
 
             // ── Header ──
@@ -651,6 +691,7 @@ fun UsageDashboard(context: android.content.Context) {
                                 when (selectedTab) {
                                     0 -> ActivityLogTab(
                                         sessions = sessions,
+                                        historySessions = historySessions,
                                         notes = notes,
                                         onSaveNote = { sessionKey, text ->
                                             scope.launch {

@@ -64,7 +64,8 @@ fun ActivityLogTab(
     notes: Map<String, String>,
     onSaveNote: (sessionKey: String, text: String) -> Unit,
     onDeleteNote: (sessionKey: String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    historySessions: List<AppSession> = emptyList()
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var showNotesOnly by remember { mutableStateOf(false) }
@@ -90,21 +91,30 @@ fun ActivityLogTab(
         return
     }
 
+    // "All" shows the live 24h sessions. "Notes only" must show a full month,
+    // so it uses the 30-day history (DB + live union) — otherwise notes older
+    // than 24h have no matching session object and appear to disappear.
+    val notesSource = remember(sessions, historySessions) {
+        if (historySessions.isNotEmpty()) {
+            historySessions
+        } else {
+            sessions
+        }
+    }
+
     // Filter sessions if "Notes only" is active
-    val filteredSessions = remember(sessions, notes, showNotesOnly) {
+    val filteredSessions = remember(notesSource, notes, showNotesOnly, sessions) {
         if (showNotesOnly) {
-            val thirtyDaysAgo = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
-            sessions.filter { session ->
-                val key = sessionKey(session)
-                notes.containsKey(key) && session.startedAt >= thirtyDaysAgo
-            }
+            notesSource.filter { session ->
+                noteForSession(session, notes) != null
+            }.sortedByDescending { it.startedAt }
         } else {
             sessions
         }
     }
 
     val grouped = remember(filteredSessions) {
-        filteredSessions.groupBy { it.startedAt / (24 * 60 * 60 * 1000) }
+        filteredSessions.groupBy { startOfDayLocal(it.startedAt) }
             .toSortedMap(compareByDescending { it })
     }
 
@@ -166,7 +176,7 @@ fun ActivityLogTab(
                             .clickable {
                                 val activity = context as? android.app.Activity
                                 if (activity != null) {
-                                    NotesPdfExporter.downloadToDownloads(activity, sessions, notes)
+                                    NotesPdfExporter.downloadToDownloads(activity, notesSource, notes)
                                 }
                             }
                             .padding(start = 4.dp)
@@ -214,11 +224,11 @@ fun ActivityLogTab(
             }
         }
 
-        for ((_, daySessions) in grouped) {
+        for ((dayStart, daySessions) in grouped) {
 
             val dateLabel = sdfDate.format(Date(daySessions.first().startedAt))
 
-            item(key = "header_$dateLabel") {
+            item(key = "header_$dayStart") {
                 Text(
                     text = dateLabel,
                     style = MaterialTheme.typography.titleSmall,
@@ -233,7 +243,9 @@ fun ActivityLogTab(
                 key = { sessionKey(it) }
             ) { session ->
                 val key = sessionKey(session)
-                val noteText = notes[key]
+                // Tolerant lookup: active sessions get a new endedAt (=now) on
+                // every load, so fall back to package+start prefix match.
+                val noteText = noteForSession(session, notes)
                 ActivityLogCard(
                     session = session,
                     context = context,
@@ -258,7 +270,8 @@ private fun ActivityLogCard(
     onDeleteNote: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-    var noteInput by remember { mutableStateOf(noteText ?: "") }
+    // Key on noteText so external saves/deletes refresh the field.
+    var noteInput by remember(noteText) { mutableStateOf(noteText ?: "") }
     val hasNote = !noteText.isNullOrBlank()
 
     // Auto-save with debounce
@@ -503,6 +516,30 @@ private fun ActivityLogCard(
 
 private fun sessionKey(session: AppSession): String {
     return "${session.packageName}_${session.startedAt}_${session.endedAt}"
+}
+
+/**
+ * Tolerant note lookup. Exact sessionKey first; fallback matches any stored
+ * key with the same package + startedAt prefix. This keeps notes visible for
+ * still-active sessions whose endedAt (=now) changes on every load.
+ */
+private fun noteForSession(session: AppSession, notes: Map<String, String>): String? {
+    notes[sessionKey(session)]?.let { return it }
+    val prefix = "${session.packageName}_${session.startedAt}_"
+    for ((k, v) in notes) {
+        if (k.startsWith(prefix)) return v
+    }
+    return null
+}
+
+/** Local-midnight day start (not UTC division), DST-safe. */
+private fun startOfDayLocal(epochMillis: Long): Long {
+    val cal = java.util.Calendar.getInstance().apply { timeInMillis = epochMillis }
+    cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+    cal.set(java.util.Calendar.MINUTE, 0)
+    cal.set(java.util.Calendar.SECOND, 0)
+    cal.set(java.util.Calendar.MILLISECOND, 0)
+    return cal.timeInMillis
 }
 
 private fun formatSessionDuration(seconds: Long): String {

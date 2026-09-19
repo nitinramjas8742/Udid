@@ -15,6 +15,17 @@ val SurfaceLight = Color(0xFFF5F7FA)
 val CardLight = Color(0xFFFFFFFF)
 val CardDark = Color(0xFF1E1E2E)
 
+// Dark-theme supporting tones: cards must differ from background,
+// otherwise surface-on-surface becomes invisible (the main "looks bad"
+// complaint). Borders/dividers need a visible-but-subtle tone too.
+val CardDarkVariant = Color(0xFF2A2A3E)
+val OutlineDark = Color(0xFF3A3A4A)
+val OutlineDarkVariant = Color(0xFF2A2A35)
+val PrimaryContainerDark = Color(0xFF004D40)
+val OnPrimaryContainerDark = Color(0xFFB2DFDB)
+val PrimaryContainerLight = Color(0xFFB2DFDB)
+val OnPrimaryContainerLight = Color(0xFF00251F)
+
 val UsageHigh = Color(0xFFE53935)
 val UsageMedium = Color(0xFFFFA726)
 val UsageLow = Color(0xFF66BB6A)

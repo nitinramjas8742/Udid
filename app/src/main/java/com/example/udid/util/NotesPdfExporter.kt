@@ -125,13 +125,17 @@ object NotesPdfExporter {
         var currentPage = startPage(document, pageNumber)
         var y = MARGIN_TOP
 
-        // Filter to only sessions with notes, sorted by time descending
+        // Filter to only sessions with notes, sorted by time descending.
+        // Tolerant match: active sessions change endedAt (=now) each load.
         val sessionsWithNotes = sessions
-            .filter { notes.containsKey(sessionKey(it)) }
-            .sortedByDescending { it.startedAt }
+            .mapNotNull { s ->
+                val note = noteForSession(s, notes) ?: return@mapNotNull null
+                s to note
+            }
+            .sortedByDescending { it.first.startedAt }
 
-        // Group by day
-        val grouped = sessionsWithNotes.groupBy { it.startedAt / (24 * 60 * 60 * 1000) }
+        // Group by local day (not UTC division).
+        val grouped = sessionsWithNotes.groupBy { startOfDayLocal(it.first.startedAt) }
             .toSortedMap(compareByDescending { it })
 
         val sdfDate = SimpleDateFormat("EEEE, MMM d, yyyy", Locale.getDefault())
@@ -157,15 +161,17 @@ object NotesPdfExporter {
         if (sessionsWithNotes.isEmpty()) {
             y = drawText(currentPage.canvas, "No notes recorded this month.", MARGIN_LEFT, y, notePaint)
         } else {
-            for ((_, daySessions) in grouped) {
+            for ((_, dayPairs) in grouped) {
+                val daySessions = dayPairs.map { it.first }
                 val dateLabel = sdfDate.format(Date(daySessions.first().startedAt))
 
-                // Check if we need a new page for the date header
-                y = ensureSpace(document, currentPage, y, 60f, pageNumber)
-                    if (y == MARGIN_TOP) {
-                        pageNumber++
-                        currentPage = startPage(document, pageNumber)
-                    }
+                // New page for the date header if needed (finish old page first).
+                if (y + 60f > PAGE_HEIGHT - MARGIN_TOP) {
+                    document.finishPage(currentPage)
+                    pageNumber++
+                    currentPage = startPage(document, pageNumber)
+                    y = MARGIN_TOP
+                }
 
                     // Date header
                 y = drawText(currentPage.canvas, dateLabel, MARGIN_LEFT, y, dateHeaderPaint)
@@ -175,15 +181,13 @@ object NotesPdfExporter {
                 currentPage.canvas.drawLine(MARGIN_LEFT, y, PAGE_WIDTH - MARGIN_RIGHT, y, linePaint)
                 y += 10f
 
-                for (session in daySessions) {
-                    val key = sessionKey(session)
-                    val note = notes[key] ?: continue
-
-                    // Check space for a full note block (approx 60pt)
-                    y = ensureSpace(document, currentPage, y, 60f, pageNumber)
-                    if (y == MARGIN_TOP) {
+                for ((session, note) in dayPairs) {
+                    // New page for a full note block (approx 60pt).
+                    if (y + 60f > PAGE_HEIGHT - MARGIN_TOP) {
+                        document.finishPage(currentPage)
                         pageNumber++
                         currentPage = startPage(document, pageNumber)
+                        y = MARGIN_TOP
                     }
 
                     // App name
@@ -254,19 +258,22 @@ object NotesPdfExporter {
         return currentY
     }
 
-    private fun ensureSpace(
-        document: PdfDocument,
-        currentPage: PdfDocument.Page,
-        currentY: Float,
-        neededSpace: Float,
-        pageNumber: Int
-    ): Float {
-        return if (currentY + neededSpace > PAGE_HEIGHT - MARGIN_TOP) {
-            // Need new page — return signal to caller
-            MARGIN_TOP
-        } else {
-            currentY
+    private fun noteForSession(session: AppSession, notes: Map<String, String>): String? {
+        notes[sessionKey(session)]?.let { return it }
+        val prefix = "${session.packageName}_${session.startedAt}_"
+        for ((k, v) in notes) {
+            if (k.startsWith(prefix)) return v
         }
+        return null
+    }
+
+    private fun startOfDayLocal(epochMillis: Long): Long {
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = epochMillis }
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+        return cal.timeInMillis
     }
 
     private fun sessionKey(session: AppSession): String {
