@@ -4,6 +4,10 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// Single source of truth for the version: used for versionName below and
+// for the release APK file name (TimeSlayer-v1.1.0.apk).
+val timeSlayerVersionName = "1.1.0"
+
 android {
     namespace = "com.example.udid"
     compileSdk {
@@ -15,7 +19,7 @@ android {
         minSdk = 24
         targetSdk = 37
         versionCode = 2
-        versionName = "1.1.0"
+        versionName = timeSlayerVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -43,6 +47,16 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+}
+
+// Name the release APK after the app + version, e.g. TimeSlayer-v1.1.0.apk,
+// so the GitHub release asset matches its download URL.
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.outputs.forEach { output ->
+            output.outputFileName.set("TimeSlayer-v$timeSlayerVersionName.apk")
+        }
     }
 }
 
